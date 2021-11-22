@@ -1,0 +1,178 @@
+# Template for deploy jobs
+.deploy:
+  image: alpine/k8s:1.21.2
+  script:
+  # Create Kubernetes namespace if not exists
+  - >
+    kubectl get namespace "$KUBE_NAMESPACE"
+    ||
+    kubectl create namespace "$KUBE_NAMESPACE"
+  # Create Kubernetes docker-registry secret
+  - >
+    kubectl
+    --namespace="$KUBE_NAMESPACE"
+    create secret docker-registry "gitlab-registry-$CI_PROJECT_PATH_SLUG"
+    --docker-email="$GITLAB_USER_EMAIL"
+    --docker-password="${CI_DEPLOY_PASSWORD:-$CI_REGISTRY_PASSWORD}"
+    --docker-server="$CI_REGISTRY"
+    --docker-username="${CI_DEPLOY_USER:-$CI_REGISTRY_USER}"
+    --dry-run=client
+    --output=yaml
+    |
+    kubectl
+    --namespace="$KUBE_NAMESPACE"
+    replace
+    --filename=-
+    --force=true
+  - |
+    for helm_values in ${!HELM_VALUES_*}; do
+      helm_args+=(--values "${!helm_values}")
+    done
+  - |
+    for helm_set in ${!HELM_SET_*}; do
+      helm_args+=(--set "${!helm_set}")
+    done
+  - |
+    for helm_setstring in ${!HELM_SETSTRING_*}; do
+      helm_args+=(--set-string "${!helm_setstring}")
+    done
+  - |
+    for helm_setfile_content in ${!HELM_SETFILE_CONTENT_*}; do
+      helm_setfile_key=HELM_SETFILE_KEY_${helm_setfile_content:21}
+      helm_args+=(--set-file "${!helm_setfile_key}=${!helm_setfile_content}")
+    done
+  - |
+    if [ -z "$HELM_CHART" ]; then
+      export HELM_CHART=./chart
+    fi
+  - |
+    if [ -n "$HELM_REPO" ]; then
+      helm_args+=(--repo $HELM_REPO)
+    fi
+  - |
+    if [ -n "$HELM_USERNAME" ]; then
+      helm_args+=(--username $HELM_USERNAME)
+    fi
+  - |
+    if [ -n "$HELM_PASSWORD" ]; then
+      helm_args+=(--password $HELM_PASSWORD)
+    fi
+  - |
+    if [ "${HELM_DEBUG,,}" == "true" ]; then
+      helm_args+=(--debug)
+    else
+      helm_args+=(--atomic)
+    fi
+  - |
+    if [ "${BUILD_ENVIRONMENTS,,}" == "true" ]; then
+      environment_tag_prefix=$CI_ENVIRONMENT_NAME-
+    fi
+  # Install Helm chart
+  - >
+    helm
+    --namespace "$KUBE_NAMESPACE"
+    upgrade
+    --install
+    --set "${HELM_KEY_REPOSITORY:-image.repository}"="$LIGHTDEVOPS_IMAGE"
+    --set "${HELM_KEY_SECRET:-imagePullSecrets[0].name}"="gitlab-registry-$CI_PROJECT_PATH_SLUG"
+    --set-string "${HELM_KEY_TAG:-image.tag}"="$environment_tag_prefix$CI_COMMIT_SHA"
+    ${helm_args[@]}
+    "$CI_PROJECT_NAME" "$HELM_CHART"
+  stage: deploy
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+# Template for clean jobs
+.clean:
+  image: alpine/k8s:1.18.2
+  script:
+  - >
+    helm uninstall
+    --namespace "$KUBE_NAMESPACE"
+    "$CI_PROJECT_NAME"
+  stage: clean
+  needs: []
+  variables:
+    GIT_STRATEGY: none
+
+# Deploy jobs with environments
+deploy:prod:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:prod
+
+deploy:stag:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:stag
+
+{{ range $environment_index, $environment_number := seq 0 9 -}}
+deploy:~env{{ $environment_number }}:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    when: never
+  - if: $ENVIRONMENT_{{ $environment_number }}_NAME == null || $ENVIRONMENT_{{ $environment_number }}_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_{{ $environment_number }}_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env{{ $environment_number }}
+
+{{ end -}}
+
+# Clean jobs with environments
+clean:prod:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    action: stop
+
+clean:stag:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    action: stop
+{{ range $environment_index, $environment_number := seq 0 9 }}
+clean:~env{{ $environment_number }}:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    when: never
+  - if: $ENVIRONMENT_{{ $environment_number }}_NAME == null || $ENVIRONMENT_{{ $environment_number }}_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_{{ $environment_number }}_NAME
+    action: stop
+{{ end -}}

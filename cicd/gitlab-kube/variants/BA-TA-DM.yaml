@@ -1,0 +1,4 @@
+variables:
+  BUILD_ENABLED: auto
+  TEST_ENABLED: auto
+  DEPLOY_ENABLED: manual

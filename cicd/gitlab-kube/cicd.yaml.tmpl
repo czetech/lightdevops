@@ -1,0 +1,21 @@
+{{ template "gitlab-common/workflow.yaml.tmpl" }}
+stages:
+- build
+- test
+- deploy
+- clean
+
+variables:
+  DOCKER_HOST: docker
+  LIGHTDEVOPS_IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG
+  TEST_PRECOMMIT_FILE: .pre-commit-config.yaml
+  ENVIRONMENT_PROD_NAME: prod
+  ENVIRONMENT_STAG_NAME: stag
+{{- $variables := (ds "variant").variables }}
+{{- if $variables }}
+{{ $variables | data.ToYAML | strings.Indent 2 -}}
+{{ else }}
+{{ end }}
+{{ template "gitlab-common/build.yaml.tmpl" }}
+{{ template "gitlab-common/test.yaml.tmpl" }}
+{{ template "gitlab-kube/deploy.yaml.tmpl" -}}

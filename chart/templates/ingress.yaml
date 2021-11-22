@@ -1,0 +1,46 @@
+{{- if .Values.ingress.enabled -}}
+{{- if semverCompare ">=1.19-0" .Capabilities.KubeVersion.GitVersion -}}
+apiVersion: networking.k8s.io/v1
+{{- else -}}
+apiVersion: networking.k8s.io/v1beta1
+{{- end }}
+kind: Ingress
+metadata:
+  name: {{ include "lightdevops.fullname" . }}
+  annotations:
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+  labels:
+    {{- include "lightdevops.labels" . | nindent 4 }}
+spec:
+  {{- if semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  rules:
+  {{- range .Values.ingress.hosts }}
+  - host: "{{ . }}"
+    http:
+      paths:
+      {{- if $.Values.ingress.precedingPaths }}
+      {{- toYaml $.Values.ingress.precedingPaths | nindent 6 }}
+      {{- end }}
+      - path: "{{ $.Values.ingress.path }}"
+        {{- if semverCompare ">=1.18-0" $.Capabilities.KubeVersion.GitVersion }}
+        pathType: {{ $.Values.ingress.pathType }}
+        {{- end }}
+        backend:
+          {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+          service:
+            name: {{ include "lightdevops.fullname" $ }}-http
+            port:
+              name: http
+          {{- else }}
+          serviceName: {{ include "lightdevops.fullname" $ }}-http
+          servicePort: http
+          {{- end }}
+      {{- if $.Values.ingress.succeedingPaths }}
+      {{- toYaml $.Values.ingress.succeedingPaths | nindent 6 }}
+      {{- end }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,2 @@
+variables:
+  BUILD_ENABLED: manual

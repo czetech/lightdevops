@@ -1,0 +1,121 @@
+# Template for build jobs
+.build:
+  image: alpine/k8s:1.21.2
+  services:
+  - docker:20.10.10-dind
+  script:
+  # Install Docker CLI
+  - apk --no-cache add docker-cli
+  # Login to GitLab Container Registry
+  - >
+    docker login
+    --password "$CI_REGISTRY_PASSWORD"
+    --username "$CI_REGISTRY_USER"
+    "$CI_REGISTRY"
+  # Pull previous images
+  - >
+    docker image pull
+    --quiet
+    "$LIGHTDEVOPS_IMAGE_PREVIOUS"
+    ||
+    docker image pull
+    --quiet
+    "$LIGHTDEVOPS_IMAGE_LATEST"
+    ||
+    echo "No previously cached image found."
+  # The build_file_content variable is the content from the GitLab point of
+  # view, in fact it is the path to the file with the desired content.
+  - |
+    for build_file_content in ${!BUILD_FILE_CONTENT_*}; do
+      build_file_path=BUILD_FILE_PATH_${build_file_content:19}
+      cp ${!build_file_content} "${!build_file_path}"
+    done
+  - |
+    if [ -n "$DOCKER_FILE" ]; then
+      docker_args+=(--file $DOCKER_FILE)
+    fi
+  - |
+    for docker_arg in ${!DOCKER_ARG_*}; do
+      docker_args+=(--build-arg ${docker_arg:11}="${!docker_arg}")
+    done
+  # Build Docker image
+  - >
+    docker build
+    --cache-from "$LIGHTDEVOPS_IMAGE_PREVIOUS"
+    --cache-from "$LIGHTDEVOPS_IMAGE_LATEST"
+    --pull
+    --tag "$LIGHTDEVOPS_IMAGE_TAGGED"
+    --tag "$LIGHTDEVOPS_IMAGE_LATEST"
+    ${docker_args[@]}
+    .
+  - docker push "$LIGHTDEVOPS_IMAGE_TAGGED"
+  - docker push "$LIGHTDEVOPS_IMAGE_LATEST"
+  stage: build
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+# Build job without environments
+build:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:latest
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+
+# Build jobs with environments
+build:prod:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+
+build:stag:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+{{ range $environment_index, $environment_number := seq 0 9 }}
+build:~env{{ $environment_number }}:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_{{ $environment_number }}_NAME == null || $ENVIRONMENT_{{ $environment_number }}_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_{{ $environment_number }}_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_{{ $environment_number }}_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_{{ $environment_number }}_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_{{ $environment_number }}_NAME-$CI_COMMIT_SHA
+{{ end -}}
