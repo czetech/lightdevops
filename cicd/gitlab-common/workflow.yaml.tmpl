@@ -1,0 +1,7 @@
+workflow:
+  rules:
+  - exists:
+    - .pre-commit-config.yaml
+    variables:
+      LIGHTDEVOPS_PRECOMMIT: "true"
+  - when: always

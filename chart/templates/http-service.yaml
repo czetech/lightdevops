@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lightdevops.fullname" . }}-http
+  annotations:
+    {{- toYaml .Values.http.service.annotations | nindent 4 }}
+  labels:
+    {{- include "lightdevops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: http
+spec:
+  type: {{ toYaml .Values.http.service.type }}
+  selector:
+    {{- include "lightdevops.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: http
+  ports:
+  - name: http
+    protocol: TCP
+    port: {{ toYaml .Values.http.service.port }}
+    targetPort: http
+    nodePort: {{ toYaml .Values.http.service.nodePort }}

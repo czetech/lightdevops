@@ -1,0 +1,19 @@
+apiVersion: v2
+name: lightdevops
+version: 0.1.0
+kubeVersion: ">= 1.14.0-0"
+description: Universal CI/CD pipelines.
+type: application
+keywords:
+- ci
+- devops
+- gitlab
+- pipeline
+home: https://opensource.cze.tech/lightdevops
+sources:
+- https://github.com/czetech/lightdevops
+maintainers:
+- name: Petr Czepiec
+  email: petr@czepiec.me
+  url: https://czepiec.me/
+appVersion: 0.1.0
