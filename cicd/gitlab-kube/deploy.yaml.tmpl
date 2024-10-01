@@ -1,0 +1,162 @@
+# Template for deploy jobs
+.deploy:
+  image: alpine/k8s:1.27.13
+  script:
+  # Set the current-context in $KUBECONFIG
+  - |
+    if [ -n "$KUBE_CONTEXT" ]; then
+      kubectl config use-context "$KUBE_CONTEXT"
+    fi
+  # Create Kubernetes namespace if not exists
+  - >
+    kubectl get namespace "$KUBE_NAMESPACE"
+    ||
+    kubectl create namespace "$KUBE_NAMESPACE"
+  # Create Kubernetes docker-registry secret
+  - >
+    kubectl
+    --namespace="$KUBE_NAMESPACE"
+    create secret docker-registry "gitlab-registry-$CI_PROJECT_PATH_SLUG"
+    --docker-email="$GITLAB_USER_EMAIL"
+    --docker-password="${CI_DEPLOY_PASSWORD:-$CI_REGISTRY_PASSWORD}"
+    --docker-server="$CI_REGISTRY"
+    --docker-username="${CI_DEPLOY_USER:-$CI_REGISTRY_USER}"
+    --dry-run=client
+    --output=yaml
+    |
+    kubectl
+    --namespace="$KUBE_NAMESPACE"
+    replace
+    --filename=-
+    --force=true
+  # Install Helm chart
+  - |
+    for helm_values in ${!HELM_VALUES_*}; do
+      helm_args+=(--values "${!helm_values}")
+    done
+  - |
+    for helm_set in ${!HELM_SET_*}; do
+      helm_args+=(--set "${!helm_set}")
+    done
+  - |
+    for helm_setstring in ${!HELM_SETSTRING_*}; do
+      helm_args+=(--set-string "${!helm_setstring}")
+    done
+  - |
+    for helm_setfile_content in ${!HELM_SETFILE_CONTENT_*}; do
+      helm_setfile_key=HELM_SETFILE_KEY_${helm_setfile_content:21}
+      helm_args+=(--set-file "${!helm_setfile_key}=${!helm_setfile_content}")
+    done
+  - |
+    if [ -z "$HELM_CHART" ]; then
+      export HELM_CHART=./chart
+    fi
+  - |
+    if [ -n "$HELM_REPO" ]; then
+      helm_args+=(--repo $HELM_REPO)
+    fi
+  - |
+    if [ -n "$HELM_USERNAME" ]; then
+      helm_args+=(--username $HELM_USERNAME)
+    fi
+  - |
+    if [ -n "$HELM_PASSWORD" ]; then
+      helm_args+=(--password $HELM_PASSWORD)
+    fi
+  - |
+    if [ "${HELM_DEBUG,,}" == "true" ]; then
+      helm_args+=(--debug)
+    else
+      helm_args+=(--atomic)
+    fi
+  - |
+    if [ "${BUILD_ENVIRONMENTS,,}" == "true" ]; then
+      environment_tag_prefix=$CI_ENVIRONMENT_NAME-
+    fi
+  - |
+    if [ -z "$HELM_REPO" ]; then
+      helm dependency build "$HELM_CHART"
+    fi
+  - >
+    helm
+    --namespace "$KUBE_NAMESPACE"
+    upgrade
+    --install
+    --set "${HELM_KEY_REPOSITORY:-image.repository}"="$LIGHTDEVOPS_IMAGE"
+    --set "${HELM_KEY_SECRET:-imagePullSecrets[0].name}"="gitlab-registry-$CI_PROJECT_PATH_SLUG"
+    --set-string "${HELM_KEY_TAG:-image.tag}"="$environment_tag_prefix$CI_COMMIT_SHA"
+    ${helm_args[@]}
+    "$CI_PROJECT_NAME" "$HELM_CHART"
+  stage: deploy
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+# Deploy jobs with environments
+deploy:prod:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: https://$LIGHTDEVOPS_HOST
+  variables:
+    KUBE_NAMESPACE: $CI_PROJECT_NAME-prod
+    LIGHTDEVOPS_HOST: $CI_PROJECT_NAME-prod.$KUBE_INGRESS_BASE_DOMAIN
+
+deploy:stag:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: https://$LIGHTDEVOPS_HOST
+  variables:
+    KUBE_NAMESPACE: $CI_PROJECT_NAME-stag
+    LIGHTDEVOPS_HOST: $CI_PROJECT_NAME-stag.$KUBE_INGRESS_BASE_DOMAIN
+
+{{ range $environment_index, $environment_number := seq 0 9 -}}
+deploy:~env{{ $environment_number }}:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_{{ $environment_number }}_NAME == null || $ENVIRONMENT_{{ $environment_number }}_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_{{ $environment_number }}_NAME
+    url: https://$LIGHTDEVOPS_HOST
+  variables:
+    KUBE_NAMESPACE: $CI_PROJECT_NAME-$ENVIRONMENT_{{ $environment_number }}_NAME
+    LIGHTDEVOPS_HOST: $CI_PROJECT_NAME-$ENVIRONMENT_{{ $environment_number }}_NAME.$KUBE_INGRESS_BASE_DOMAIN
+
+{{ end -}}
+
+# Test review deployments
+# TODO: CI_COMMIT_REF_SLUG short to 63 minus used?
+# TODO: no review but more universal
+# TODO: clean auto/manual regex
+deploy:review:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $CI_COMMIT_REF_NAME
+    url: https://$LIGHTDEVOPS_HOST
+  variables:
+    KUBE_NAMESPACE: $CI_PROJECT_NAME-$CI_COMMIT_REF_SLUG
+    LIGHTDEVOPS_HOST: $CI_PROJECT_NAME-$CI_COMMIT_REF_SLUG.$KUBE_INGRESS_BASE_DOMAIN

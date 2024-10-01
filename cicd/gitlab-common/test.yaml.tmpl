@@ -1,0 +1,197 @@
+# Template for test jobs
+.test:
+  image: alpine/k8s:1.21.2
+  services:
+  - docker:20.10.10-dind
+  script:
+  # Install Docker CLI
+  - apk --no-cache add docker-cli
+  # Login to GitLab Container Registry
+  - >
+    docker login
+    --password "$CI_REGISTRY_PASSWORD"
+    --username "$CI_REGISTRY_USER"
+    "$CI_REGISTRY"
+  # Run Docker image with test command
+  - docker run "$LIGHTDEVOPS_IMAGE_TAGGED" "$LIGHTDEVOPS_TEST_COMMAND"
+  stage: test
+  variables:
+    GIT_STRATEGY: none
+
+# Test jobs without environments
+unit:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+{{ range $test_index, $test_number := seq 0 9 -}}
+~test{{ $test_number }}:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_{{ $test_number }}_COMMAND == null || $TEST_{{ $test_number }}_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_{{ $test_number }}_COMMAND
+
+{{ end -}}
+
+# Test jobs with environments
+unit:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+{{ range $test_index, $test_number := seq 0 9 -}}
+~test{{ $test_number }}:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_{{ $test_number }}_COMMAND == null || $TEST_{{ $test_number }}_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_{{ $test_number }}_COMMAND
+
+{{ end -}}
+
+unit:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+{{ range $test_index, $test_number := seq 0 9 -}}
+~test{{ $test_number }}:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_{{ $test_number }}_COMMAND == null || $TEST_{{ $test_number }}_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_{{ $test_number }}_COMMAND
+
+{{ end -}}
+
+{{ range $environment_index, $environment_number := seq 0 9 -}}
+unit:~env{{ $environment_number }}:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_{{ $environment_number }}_NAME == null || $ENVIRONMENT_{{ $environment_number }}_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_{{ $environment_number }}_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_{{ $environment_number }}_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+{{ range $test_index, $test_number := seq 0 9 -}}
+~test{{ $test_number }}:~env{{ $environment_number }}:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_{{ $environment_number }}_NAME == null || $ENVIRONMENT_{{ $environment_number }}_NAME == ""
+    when: never
+  - if: $TEST_{{ $test_number }}_COMMAND == null || $TEST_{{ $test_number }}_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_{{ $environment_number }}_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_{{ $environment_number }}_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_{{ $test_number }}_COMMAND
+
+{{ end -}}
+{{ end -}}
+
+# Test jobs for codebase
+pre-commit:
+  image: alpine/k8s:1.21.2
+  script:
+  # Install necessary packages
+  - apk --no-cache add go npm python3-dev ruby
+  # Upgrade pip to have wheels on Alpine Linux
+  - pip --no-cache-dir install --upgrade pip
+  # Install pre-commit
+  - pip --no-cache-dir install pre-commit
+  # Install hooks
+  - pre-commit install --config "$TEST_PRECOMMIT_FILE" --install-hooks
+  # Run hooks
+  - pre-commit run --config "$TEST_PRECOMMIT_FILE" --all-files
+  stage: test
+  rules:
+  - if: $LIGHTDEVOPS_PRECOMMIT != "true" && ($TEST_PRECOMMIT_ENABLED == null || $TEST_PRECOMMIT_ENABLED == "")
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i && ($TEST_PRECOMMIT_ENABLED == null || $TEST_PRECOMMIT_ENABLED == "")
+  - if: $TEST_ENABLED =~ /^manual$/i && ($TEST_PRECOMMIT_ENABLED == null || $TEST_PRECOMMIT_ENABLED == "")
+    when: manual
+  - if: $TEST_PRECOMMIT_ENABLED =~ /^auto$/i
+  - if: $TEST_PRECOMMIT_ENABLED =~ /^manual$/i
+    when: manual
+  needs: []
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal

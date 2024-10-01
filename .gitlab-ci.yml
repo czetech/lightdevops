@@ -1,0 +1,3402 @@
+workflow:
+  rules:
+  - exists:
+    - .pre-commit-config.yaml
+    variables:
+      LIGHTDEVOPS_PRECOMMIT: "true"
+  - when: always
+
+stages:
+- build
+- test
+- deploy
+- clean
+
+variables:
+  DOCKER_HOST: docker
+  LIGHTDEVOPS_IMAGE: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG
+  TEST_PRECOMMIT_FILE: .pre-commit-config.yaml
+  ENVIRONMENT_PROD_NAME: prod
+  ENVIRONMENT_STAG_NAME: stag
+  BUILD_ENABLED: auto
+  DEPLOY_ENABLED: manual
+  TEST_ENABLED: auto
+
+# Template for build jobs
+.build:
+  image: alpine/k8s:1.27.13
+  services:
+  - docker:26-dind-rootless
+  script:
+  # Install Docker CLI
+  - apk --no-cache add docker-cli
+  # Login to GitLab Container Registry
+  - >
+    docker login
+    --password "$CI_REGISTRY_PASSWORD"
+    --username "$CI_REGISTRY_USER"
+    "$CI_REGISTRY"
+  # Pull previous images
+  - >
+    docker image pull
+    --quiet
+    "$LIGHTDEVOPS_IMAGE_PREVIOUS"
+    ||
+    docker image pull
+    --quiet
+    "$LIGHTDEVOPS_IMAGE_LATEST"
+    ||
+    echo "No previously cached image found."
+  # The build_file_content variable is the content from the GitLab point of
+  # view, in fact it is the path to the file with the desired content.
+  - |
+    for build_file_content in ${!BUILD_FILE_CONTENT_*}; do
+      build_file_path=BUILD_FILE_PATH_${build_file_content:19}
+      cp ${!build_file_content} "${!build_file_path}"
+    done
+  - |
+    if [ -n "$DOCKER_FILE" ]; then
+      docker_args+=(--file $DOCKER_FILE)
+    fi
+  - |
+    for docker_arg in ${!DOCKER_ARG_*}; do
+      docker_args+=(--build-arg ${docker_arg:11}="${!docker_arg}")
+    done
+  # Build Docker image
+  - >
+    docker build
+    --cache-from "$LIGHTDEVOPS_IMAGE_PREVIOUS"
+    --cache-from "$LIGHTDEVOPS_IMAGE_LATEST"
+    --pull
+    --tag "$LIGHTDEVOPS_IMAGE_TAGGED"
+    --tag "$LIGHTDEVOPS_IMAGE_LATEST"
+    ${docker_args[@]}
+    "${DOCKER_PATH:-.}"
+  - docker push "$LIGHTDEVOPS_IMAGE_TAGGED"
+  - docker push "$LIGHTDEVOPS_IMAGE_LATEST"
+  stage: build
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+# Build job without environments
+build:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:latest
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+
+# Build jobs with environments
+build:prod:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+
+build:stag:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+
+build:~env0:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+
+build:~env1:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+
+build:~env2:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+
+build:~env3:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+
+build:~env4:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+
+build:~env5:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+
+build:~env6:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+
+build:~env7:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+
+build:~env8:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+
+build:~env9:
+  extends: .build
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $BUILD_ENABLED =~ /^auto$/i
+  - if: $BUILD_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_PREVIOUS: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_BEFORE_SHA
+    LIGHTDEVOPS_IMAGE_LATEST: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+
+# Template for test jobs
+.test:
+  image: alpine/k8s:1.21.2
+  services:
+  - docker:20.10.10-dind
+  script:
+  # Install Docker CLI
+  - apk --no-cache add docker-cli
+  # Login to GitLab Container Registry
+  - >
+    docker login
+    --password "$CI_REGISTRY_PASSWORD"
+    --username "$CI_REGISTRY_USER"
+    "$CI_REGISTRY"
+  # Run Docker image with test command
+  - docker run "$LIGHTDEVOPS_IMAGE_TAGGED" "$LIGHTDEVOPS_TEST_COMMAND"
+  stage: test
+  variables:
+    GIT_STRATEGY: none
+
+# Test jobs without environments
+unit:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS =~ /^true$/i
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+# Test jobs with environments
+unit:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:prod:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_PROD_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:stag:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_STAG_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env0:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_0_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env1:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_1_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env2:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_2_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env3:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_3_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env4:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_4_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env5:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_5_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env6:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_6_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env7:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_7_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env8:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_8_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+unit:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_UNIT_COMMAND == null || $TEST_UNIT_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_UNIT_COMMAND
+
+~test0:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_0_COMMAND == null || $TEST_0_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_0_COMMAND
+
+~test1:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_1_COMMAND == null || $TEST_1_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_1_COMMAND
+
+~test2:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_2_COMMAND == null || $TEST_2_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_2_COMMAND
+
+~test3:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_3_COMMAND == null || $TEST_3_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_3_COMMAND
+
+~test4:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_4_COMMAND == null || $TEST_4_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_4_COMMAND
+
+~test5:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_5_COMMAND == null || $TEST_5_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_5_COMMAND
+
+~test6:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_6_COMMAND == null || $TEST_6_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_6_COMMAND
+
+~test7:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_7_COMMAND == null || $TEST_7_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_7_COMMAND
+
+~test8:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_8_COMMAND == null || $TEST_8_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_8_COMMAND
+
+~test9:~env9:
+  extends: .test
+  rules:
+  - if: $BUILD_ENVIRONMENTS !~ /^true$/i
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $TEST_9_COMMAND == null || $TEST_9_COMMAND == ""
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i
+  - if: $TEST_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+  variables:
+    LIGHTDEVOPS_IMAGE_TAGGED: $LIGHTDEVOPS_IMAGE:$ENVIRONMENT_9_NAME-$CI_COMMIT_SHA
+    LIGHTDEVOPS_TEST_COMMAND: $TEST_9_COMMAND
+
+# Test jobs for codebase
+pre-commit:
+  image: alpine/k8s:1.21.2
+  script:
+  # Install necessary packages
+  - apk --no-cache add go npm python3-dev ruby
+  # Upgrade pip to have wheels on Alpine Linux
+  - pip --no-cache-dir install --upgrade pip
+  # Install pre-commit
+  - pip --no-cache-dir install pre-commit
+  # Install hooks
+  - pre-commit install --config "$TEST_PRECOMMIT_FILE" --install-hooks
+  # Run hooks
+  - pre-commit run --config "$TEST_PRECOMMIT_FILE" --all-files
+  stage: test
+  rules:
+  - if: $LIGHTDEVOPS_PRECOMMIT != "true" && ($TEST_PRECOMMIT_ENABLED == null || $TEST_PRECOMMIT_ENABLED == "")
+    when: never
+  - if: $TEST_ENABLED =~ /^auto$/i && ($TEST_PRECOMMIT_ENABLED == null || $TEST_PRECOMMIT_ENABLED == "")
+  - if: $TEST_ENABLED =~ /^manual$/i && ($TEST_PRECOMMIT_ENABLED == null || $TEST_PRECOMMIT_ENABLED == "")
+    when: manual
+  - if: $TEST_PRECOMMIT_ENABLED =~ /^auto$/i
+  - if: $TEST_PRECOMMIT_ENABLED =~ /^manual$/i
+    when: manual
+  needs: []
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+# Template for deploy jobs
+.deploy:
+  image: alpine/k8s:1.27.13
+  script:
+  # Create Kubernetes namespace if not exists
+  - >
+    kubectl get namespace "$KUBE_NAMESPACE"
+    ||
+    kubectl create namespace "$KUBE_NAMESPACE"
+  # Create Kubernetes docker-registry secret
+  - >
+    kubectl
+    --namespace="$KUBE_NAMESPACE"
+    create secret docker-registry "gitlab-registry-$CI_PROJECT_PATH_SLUG"
+    --docker-email="$GITLAB_USER_EMAIL"
+    --docker-password="${CI_DEPLOY_PASSWORD:-$CI_REGISTRY_PASSWORD}"
+    --docker-server="$CI_REGISTRY"
+    --docker-username="${CI_DEPLOY_USER:-$CI_REGISTRY_USER}"
+    --dry-run=client
+    --output=yaml
+    |
+    kubectl
+    --namespace="$KUBE_NAMESPACE"
+    replace
+    --filename=-
+    --force=true
+  # Install Helm chart
+  - |
+    for helm_values in ${!HELM_VALUES_*}; do
+      helm_args+=(--values "${!helm_values}")
+    done
+  - |
+    for helm_set in ${!HELM_SET_*}; do
+      helm_args+=(--set "${!helm_set}")
+    done
+  - |
+    for helm_setstring in ${!HELM_SETSTRING_*}; do
+      helm_args+=(--set-string "${!helm_setstring}")
+    done
+  - |
+    for helm_setfile_content in ${!HELM_SETFILE_CONTENT_*}; do
+      helm_setfile_key=HELM_SETFILE_KEY_${helm_setfile_content:21}
+      helm_args+=(--set-file "${!helm_setfile_key}=${!helm_setfile_content}")
+    done
+  - |
+    if [ -z "$HELM_CHART" ]; then
+      export HELM_CHART=./chart
+    fi
+  - |
+    if [ -n "$HELM_REPO" ]; then
+      helm_args+=(--repo $HELM_REPO)
+    fi
+  - |
+    if [ -n "$HELM_USERNAME" ]; then
+      helm_args+=(--username $HELM_USERNAME)
+    fi
+  - |
+    if [ -n "$HELM_PASSWORD" ]; then
+      helm_args+=(--password $HELM_PASSWORD)
+    fi
+  - |
+    if [ "${HELM_DEBUG,,}" == "true" ]; then
+      helm_args+=(--debug)
+    else
+      helm_args+=(--atomic)
+    fi
+  - |
+    if [ "${BUILD_ENVIRONMENTS,,}" == "true" ]; then
+      environment_tag_prefix=$CI_ENVIRONMENT_NAME-
+    fi
+  - helm dependency build "$HELM_CHART"
+  - >
+    helm
+    --namespace "$KUBE_NAMESPACE"
+    upgrade
+    --install
+    --set "${HELM_KEY_REPOSITORY:-image.repository}"="$LIGHTDEVOPS_IMAGE"
+    --set "${HELM_KEY_SECRET:-imagePullSecrets[0].name}"="gitlab-registry-$CI_PROJECT_PATH_SLUG"
+    --set-string "${HELM_KEY_TAG:-image.tag}"="$environment_tag_prefix$CI_COMMIT_SHA"
+    ${helm_args[@]}
+    "$CI_PROJECT_NAME" "$HELM_CHART"
+  stage: deploy
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+# Template for clean jobs
+.clean:
+  image: alpine/k8s:1.18.2
+  script:
+  - >
+    helm uninstall
+    --namespace "$KUBE_NAMESPACE"
+    "$CI_PROJECT_NAME"
+  stage: clean
+  needs: []
+  variables:
+    GIT_STRATEGY: none
+
+# Deploy jobs with environments
+deploy:prod:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:prod
+
+deploy:stag:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:stag
+
+deploy:~env0:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env0
+
+deploy:~env1:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env1
+
+deploy:~env2:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env2
+
+deploy:~env3:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env3
+
+deploy:~env4:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env4
+
+deploy:~env5:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env5
+
+deploy:~env6:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env6
+
+deploy:~env7:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env7
+
+deploy:~env8:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env8
+
+deploy:~env9:
+  extends: .deploy
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i
+  - if: $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    url: $DEPLOY_URL
+    on_stop: clean:~env9
+
+# Clean jobs with environments
+clean:prod:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_PROD_NAME
+    action: stop
+
+clean:stag:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_STAG_NAME
+    action: stop
+
+clean:~env0:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_0_NAME == null || $ENVIRONMENT_0_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_0_NAME
+    action: stop
+
+clean:~env1:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_1_NAME == null || $ENVIRONMENT_1_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_1_NAME
+    action: stop
+
+clean:~env2:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_2_NAME == null || $ENVIRONMENT_2_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_2_NAME
+    action: stop
+
+clean:~env3:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_3_NAME == null || $ENVIRONMENT_3_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_3_NAME
+    action: stop
+
+clean:~env4:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_4_NAME == null || $ENVIRONMENT_4_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_4_NAME
+    action: stop
+
+clean:~env5:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_5_NAME == null || $ENVIRONMENT_5_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_5_NAME
+    action: stop
+
+clean:~env6:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_6_NAME == null || $ENVIRONMENT_6_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_6_NAME
+    action: stop
+
+clean:~env7:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_7_NAME == null || $ENVIRONMENT_7_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_7_NAME
+    action: stop
+
+clean:~env8:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_8_NAME == null || $ENVIRONMENT_8_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_8_NAME
+    action: stop
+
+clean:~env9:
+  extends: .clean
+  rules:
+  - if: $CI_KUBERNETES_ACTIVE != "true" || ($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH != "production" && $CI_COMMIT_BRANCH != "staging" && $CI_COMMIT_BRANCH != "planner")
+    when: never
+  - if: $ENVIRONMENT_9_NAME == null || $ENVIRONMENT_9_NAME == ""
+    when: never
+  - if: $DEPLOY_ENABLED =~ /^auto$/i || $DEPLOY_ENABLED =~ /^manual$/i
+    when: manual
+  environment:
+    name: $ENVIRONMENT_9_NAME
+    action: stop
